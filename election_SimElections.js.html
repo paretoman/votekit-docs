@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: election/SimElections.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: election/SimElections.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** @module */
+
+import CandidateDistributionSampler from './CandidateDistributionSampler.js'
+import simpleCandidate from './simpleCandidate.js'
+
+/**
+ * Simulate winners from many elections.
+ * Candidates are sampled from a distribution.
+ * Winners are drawn as points.
+ * The simulation is dynamic. More simulations are performed at each frame.
+ * @param {Screen} screen
+ * @param {Menu} menu
+ * @param {Election} election
+ */
+export default function SimElections(screen, menu, election) {
+    const self = this
+
+    self.points = []
+    self.newPoints = []
+
+    const candidateDistributions = []
+
+    self.newVoterGroup = function (voterGroup) {
+        election.newVoterGroup(voterGroup)
+    }
+
+    self.newCandidateDistribution = function (canDis) {
+        candidateDistributions.push(canDis)
+    }
+
+    self.startSim = function () {
+        // All the election calculations happen here.
+
+        self.sampler = new CandidateDistributionSampler(candidateDistributions)
+
+        self.points = []
+
+        clearBuffer()
+    }
+
+    self.addSim = function () {
+        // add more points
+
+        if (self.points.length > 5000) return
+        // this limit right now is about graphics rendering.
+        // todo: render to a buffer
+
+        // number of sample elections
+        const ns = 20
+
+        for (let i = 0; i &lt; ns; i++) {
+            // choose a number of candidates
+            let nk
+            if (election.method.checkElectionType() === 'singleWinner') {
+                nk = 5
+            } else if (election.method.checkElectionType() === 'allocation') {
+                nk = 10
+            }
+            for (let k = 0; k &lt; nk; k++) {
+                // sample a point from the distribution of candidates
+                const point = self.sampler.samplePoint()
+
+                // make a candidate... could make simpler
+                simpleCandidate(point.x, point.y, election)
+            }
+
+            // find winner position
+            const results = election.runElection()
+
+            if (election.method.checkElectionType() === 'singleWinner') {
+                const { winner } = results
+
+                // record point
+                const winPoint = { x: winner.x, y: winner.y }
+                self.points.push(winPoint)
+                self.newPoints.push(winPoint)
+            } else {
+                const { allocation, candidates } = results
+
+                const jitterSize = 100
+                candidates.forEach(
+                    (can, k) => {
+                        const numPoints = allocation[k]
+                        for (let m = 0; m &lt; numPoints; m++) {
+                            let winPoint
+                            if (m === 0) {
+                                // record point
+                                winPoint = { x: can.x, y: can.y }
+                            } else {
+                                // add jitter
+                                winPoint = {
+                                    x: can.x + (Math.random() - 0.5) * jitterSize,
+                                    y: can.y + (Math.random() - 0.5) * jitterSize,
+                                }
+                            }
+                            // record point
+                            self.points.push(winPoint)
+                            self.newPoints.push(winPoint)
+                        }
+                    },
+                )
+            }
+            election.clearCandidates()
+        }
+        renderToBuffer()
+    }
+
+    // buffer canvas
+    const canvas2 = document.createElement('canvas')
+    canvas2.width = screen.canvas.width
+    canvas2.height = screen.canvas.height
+    const context2 = canvas2.getContext('2d')
+
+    function clearBuffer() {
+        context2.clearRect(0, 0, canvas2.width, canvas2.height)
+    }
+
+    function renderToBuffer() {
+        const ctx = context2
+        renderPoints(ctx, self.newPoints)
+        self.newPoints = []
+    }
+
+    self.render = function () {
+        if (screen.noBuffers) {
+            self.noBufferRender()
+        } else {
+            self.bufferRender()
+        }
+    }
+
+    self.bufferRender = function () {
+        const { ctx } = screen
+        ctx.drawImage(canvas2, 0, 0)
+    }
+
+    // use this if we want to export to an SVG
+    self.noBufferRender = function () {
+        const { ctx } = screen
+        renderPoints(ctx, self.points)
+    }
+
+    function renderPoints(ctx, points) {
+        ctx.fillStyle = 'grey'
+        const n = points.length
+        for (let i = 0; i &lt; n; i++) {
+            const p = points[i]
+            // dot
+            ctx.beginPath()
+            ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI)
+            ctx.fill()
+        }
+    }
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-castVotes_AreaSummer.html">castVotes/AreaSummer</a></li><li><a href="module-castVotes_castVotes.html">castVotes/castVotes</a></li><li><a href="module-castVotes_pluralityBallot.html">castVotes/pluralityBallot</a></li><li><a href="module-election_CandidateDistributionSampler.html">election/CandidateDistributionSampler</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionMethod.html">election/ElectionMethod</a></li><li><a href="module-election_SimElections.html">election/SimElections</a></li><li><a href="module-election_simpleCandidate.html">election/simpleCandidate</a></li><li><a href="module-electionMethods_electionMethods.html">electionMethods/electionMethods</a></li><li><a href="module-electionMethods_huntingtonHill.html">electionMethods/huntingtonHill</a></li><li><a href="module-electionMethods_plurality.html">electionMethods/plurality</a></li><li><a href="module-electionMethods_randomWinner.html">electionMethods/randomWinner</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_entities_Candidate.html">sim/entities/Candidate</a></li><li><a href="module-sim_entities_CandidateDistribution.html">sim/entities/CandidateDistribution</a></li><li><a href="module-sim_entities_CircleGraphic.html">sim/entities/CircleGraphic</a></li><li><a href="module-sim_entities_graphicsUtilities.html">sim/entities/graphicsUtilities</a></li><li><a href="module-sim_entities_SimVoterCircle.html">sim/entities/SimVoterCircle</a></li><li><a href="module-sim_entities_SquareGraphic.html">sim/entities/SquareGraphic</a></li><li><a href="module-sim_entities_VoronoiGroup.html">sim/entities/VoronoiGroup</a></li><li><a href="module-sim_entities_VoterCircle.html">sim/entities/VoterCircle</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimMany.html">sim/states/SimMany</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-test_test.html">test/test</a></li><li><a href="module-ui_addSVGOutput.html">ui/addSVGOutput</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_DraggableManager.html">ui/DraggableManager</a></li><li><a href="module-ui_sandbox.html">ui/sandbox</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li></ul><h3>Global</h3><ul><li><a href="global.html#targets">targets</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.10</a> on Mon Feb 07 2022 20:38:46 GMT-0500 (Eastern Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

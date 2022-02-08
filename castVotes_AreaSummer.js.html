@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: castVotes/AreaSummer.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: castVotes/AreaSummer.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** @module */
+
+/**
+ * Sum area of voter distributions to tally the votes.
+ * @param {*} cans
+ */
+export default function AreaSummer(cans) {
+    const self = this
+
+    const lines = findLines(cans)
+
+    // todo: figure out if this is really just a function rather than a class.
+
+    self.sumArea = function sumArea(voterGroup) {
+        // draw lines across shape of voterGroup
+
+        const n = lines.length
+        const area = Array(n)
+        for (let i = 0; i &lt; n; i++) {
+            const lineSet = lines[i]
+            // return area for each candidate
+            area[i] = sumCircle(voterGroup, lineSet)
+        }
+        return area
+    }
+}
+
+function findLines(cans) {
+    // find all lines
+    const n = cans.length
+    const lines = new Array(n) // each candidate has a set of lines for themselves
+    for (let i = 0; i &lt; n; i++) {
+        lines[i] = []
+        for (let k = 0; k &lt; n; k++) {
+            // skip sames
+            if (i === k) continue
+            // find equation for a line
+            const c1 = cans[i]
+            const c2 = cans[k]
+            // lines[i][k] = equidistantLine(c1,c2) // problem when i === k
+            lines[i].push(equidistantLine(c1, c2))
+        }
+    }
+
+    return lines
+}
+
+export function testEquidistantLine(eq, assert) {
+    // Takes an assertion function.
+    // Returns a test function.
+
+    return [{
+        label: 'Finds line equation equidistant from two points.',
+        test: () => {
+            const m = equidistantLine({ x: 0, y: 0 }, { x: 1, y: 1 })
+            const e = { A: { x: 1, y: 1 }, b: 1 }
+            eq(e.A.x / e.b, m.A.x / m.b)
+            eq(e.A.y / e.b, m.A.y / m.b)
+        },
+    }, {
+        label: 'The first point satisfies Ac &lt; b. A[0,0] &lt; b. ',
+        test: () => {
+            const m = equidistantLine({ x: 0, y: 0 }, { x: 1, y: 1 })
+            assert(m.b > 0)
+        },
+    },
+    ]
+}
+
+function equidistantLine(c1, c2) {
+    // Ac &lt; b
+    // this is the condition that x counts for a candidate.
+
+    // line equidistant from two points
+    // https://math.stackexchange.com/a/771773
+
+    // difference between points
+    const dx = c2.x - c1.x
+    const dy = c2.y - c1.y
+
+    // midpoint between points
+    const mx = (c1.x + c2.x) * 0.5
+    const my = (c1.y + c2.y) * 0.5
+
+    // equation for line
+    // (y-my) / (x-mx) = - dx / dy
+    // implies y * dy - my * dy = - x * dx + mx * dx
+    // implies dx * x + dy * y = mx * dx + my * dy
+    // rename to A = [dx;dy]
+    //           b = mx * dx + my * dy
+    const A = { x: dx, y: dy }
+    const b = mx * dx + my * dy
+
+    // is c1 or c2 closer?
+    // c1 is closer is equivalent to Ac &lt; b
+
+    return { A, b }
+}
+
+function sumCircle(circle, lineSet) {
+    // integrate inside
+    //   Need a direction for "inside" for each line.
+    //   Then do a 1D consideration of what is inside.
+
+    // for each x coordinate,
+    const dx = 2
+    let sum = 0
+    const x1 = circle.x
+    const y1 = circle.y
+    const { r } = circle
+    // x only goes from x1-r to x1+r
+    for (let x = x1 - r; x &lt; x1 + r; x += dx) {
+        // find bounds
+
+        // find equation for circle
+
+        // (y - y1)**2 + (x-x1)**2 &lt; r**2
+        const diff2 = r ** 2 - (x - x1) ** 2
+        let half
+        if (diff2 > 0) {
+            half = Math.sqrt(diff2)
+        } else {
+            half = 0
+        }
+        let high = y1 + half
+        let low = y1 - half
+
+        // for each of the constraints, figure out if it is an upper or lower bound,
+        // then adjust the bound.
+        // The y coefficient tells us whether this is an upper or lower bound.
+        // Imagine infinite +y.
+        // If the y coefficient is negative, then Ac &lt; b, and Ac = b is a lower bound.
+        // A.x * x + A.y * y = b
+        // y = (b - A.x * x) / A.y
+        lineSet.forEach((line) => {
+            const ay = line.A.y
+            const ax = line.A.x
+            const { b } = line
+            if (ay === 0) {
+                if (ax * x &lt; b) {
+                    // no bounds
+                } else {
+                    low = Infinity // bounded by x
+                }
+                // not handling 0,0 case
+            } else {
+                const y2 = (b - ax * x) / ay
+                if (ay &lt; 0) {
+                    low = Math.max(low, y2)
+                } else {
+                    high = Math.min(high, y2)
+                }
+            }
+        })
+
+        // count area inside lines
+        const dy = high - low
+        if (dy > 0) {
+            const area = dy * dx
+            sum += area
+        }
+    }
+    return sum
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-castVotes_AreaSummer.html">castVotes/AreaSummer</a></li><li><a href="module-castVotes_castVotes.html">castVotes/castVotes</a></li><li><a href="module-castVotes_pluralityBallot.html">castVotes/pluralityBallot</a></li><li><a href="module-election_CandidateDistributionSampler.html">election/CandidateDistributionSampler</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionMethod.html">election/ElectionMethod</a></li><li><a href="module-election_SimElections.html">election/SimElections</a></li><li><a href="module-election_simpleCandidate.html">election/simpleCandidate</a></li><li><a href="module-electionMethods_electionMethods.html">electionMethods/electionMethods</a></li><li><a href="module-electionMethods_huntingtonHill.html">electionMethods/huntingtonHill</a></li><li><a href="module-electionMethods_plurality.html">electionMethods/plurality</a></li><li><a href="module-electionMethods_randomWinner.html">electionMethods/randomWinner</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_entities_Candidate.html">sim/entities/Candidate</a></li><li><a href="module-sim_entities_CandidateDistribution.html">sim/entities/CandidateDistribution</a></li><li><a href="module-sim_entities_CircleGraphic.html">sim/entities/CircleGraphic</a></li><li><a href="module-sim_entities_graphicsUtilities.html">sim/entities/graphicsUtilities</a></li><li><a href="module-sim_entities_SimVoterCircle.html">sim/entities/SimVoterCircle</a></li><li><a href="module-sim_entities_SquareGraphic.html">sim/entities/SquareGraphic</a></li><li><a href="module-sim_entities_VoronoiGroup.html">sim/entities/VoronoiGroup</a></li><li><a href="module-sim_entities_VoterCircle.html">sim/entities/VoterCircle</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimMany.html">sim/states/SimMany</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-test_test.html">test/test</a></li><li><a href="module-ui_addSVGOutput.html">ui/addSVGOutput</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_DraggableManager.html">ui/DraggableManager</a></li><li><a href="module-ui_sandbox.html">ui/sandbox</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li></ul><h3>Global</h3><ul><li><a href="global.html#targets">targets</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.10</a> on Mon Feb 07 2022 20:38:46 GMT-0500 (Eastern Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
