@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: electionMethods/stv.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: electionMethods/stv.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** @module */
+
+import {
+    copyArrayShallow, maxIndex, minIndex, range,
+} from '../utilities/jsHelpers.js'
+
+/**
+ * Single Transferable Vote
+ * @param {Object} votes
+ * @param {Number[]} votes.tallyFractions - A list of fractions of voters
+ * who ranked a candidate first, indexed by candidate.
+ * @param {Number[]} votes.rankingTallyFractions - A list of fractions of voters
+ * who share the same ranking.
+ * @param {Number[][][]} votes.cansRankedAll - A list of lists of lists.
+ * The first index is a group of voters who share the same ranking.
+ * The second index is the rank number.
+ * The third index is for a list of candidates at that rank.
+ * @param {Object} electionMethodOptions
+ * @param {number} electionMethodOptions.seats - The number of seats to fill.
+ * @returns {{allocation:number[]}} - A variable "socialChoiceResults",
+ * with the property "allocation".
+ * Allocation is an array of integers that say whether a candidate is elected (1) or not (0).
+ */
+export default function stv(votes, electionMethodOptions) {
+    const { tallyFractions, rankingTallyFractions, cansRankedAll } = votes
+    const { seats } = electionMethodOptions
+
+    const nk = tallyFractions.length
+    const nr = rankingTallyFractions.length
+
+    if (seats >= nk) {
+        // more seats than candidates, so elect all candidates
+        const allocation = Array(nk).fill(1)
+        const socialChoiceResults = { allocation }
+        return socialChoiceResults
+    }
+
+    // Candidates must have more votes than quota to be elected, as a fraction of total votes.
+    const quota = 1 / (seats + 1)
+
+    // start round
+    let resolved = false
+    // round (starts at 0)
+    let r = 0
+    // Count the number of candidates elected
+    const elected = []
+    // the current tally of first preferences among candidates still remaining
+    let tally = copyArrayShallow(tallyFractions)
+    // is the candidate still in the running? Alternatively, they have been eliminated.
+    const stillIn = Array(nk).fill(true)
+    let canInTally = range(nk)
+    // Which rank is currently being added to the tally?
+    const activeRank = Array(nr).fill(0)
+    // What is the weight of each group of voters?
+    const weight = Array(nr).fill(1)
+    // has the ballot been exhausted?
+    const exhausted = Array(nr).fill(false)
+
+    while (!resolved &amp;&amp; r &lt; nk) {
+        if (r !== 0) {
+            // tally top preferences
+            tally = Array(nk).fill(0)
+            for (let i = 0; i &lt; cansRankedAll.length; i++) {
+                if (exhausted[i]) continue
+                const ar = activeRank[i]
+                const canArs = cansRankedAll[i][ar]
+                // candidates in the same rank each get full support
+                for (let k = 0; k &lt; canArs.length; k++) {
+                    const canAr = canArs[k]
+                    tally[canAr] += rankingTallyFractions[i] * weight[i]
+                }
+            }
+            tally = tally.filter((_, i) => stillIn[i])
+            canInTally = range(nk).filter((i) => stillIn[i]) // candidate corresponding to tally
+        }
+
+        // either eliminate or elect
+        const siWinner = maxIndex(tally)
+        const iWinner = canInTally[siWinner]
+        const votesForWinner = tally[siWinner]
+        const elect = votesForWinner >= quota
+        let reweight = 1
+        let iEliminate
+        if (elect) {
+            // remove winning candidate
+            iEliminate = iWinner
+
+            // reweight and move activeRank forward
+            reweight = 1 - quota / votesForWinner
+
+            // is the counting done? Did we elect enough candidates?
+            elected.push(iWinner)
+            resolved = elected.length === seats
+        } else {
+            // remove losing candidate
+            const siLoser = minIndex(tally)
+            const iLoser = canInTally[siLoser]
+            iEliminate = iLoser
+        }
+
+        // eliminate a candidate and reweight if needed
+        stillIn[iEliminate] = false
+        for (let i = 0; i &lt; cansRankedAll.length; i++) {
+            if (exhausted[i]) continue
+            const ar = activeRank[i]
+            const canArs = cansRankedAll[i][ar]
+            if (canArs.includes(iEliminate)) {
+                if (reweight !== 1) {
+                    weight[i] *= reweight // reweight if voter selected winner
+                }
+                // move activeRank forward
+                // while the current activeRank is not still in the running
+                // and while the ballot is not exhausted
+                let moveForward = !exhausted[i]
+                while (moveForward) {
+                    activeRank[i] += 1
+                    const arf = activeRank[i]
+
+                    // is ballot exhausted? then stop counting this ballot.
+                    if (arf === nk) {
+                        exhausted[i] = true
+                        break
+                    }
+
+                    const canArfs = cansRankedAll[i][arf]
+
+                    // Only move forward if none of the candidates in this rank are still in.
+                    for (let k = 0; k &lt; canArfs.length; k++) {
+                        const can = canArfs[k]
+                        moveForward = moveForward &amp;&amp; !stillIn[can]
+                    }
+                }
+            }
+        }
+
+        // increment round
+        r += 1
+    }
+
+    // sanity check
+    // We eliminated all the candidates, r == nk, but didn't get enough winners
+    if (!resolved) {
+        // eslint-disable-next-line no-console
+        console.warn('warning: STV ran over - eliminated all candidates.')
+    }
+
+    const allocation = Array(nk).fill(0)
+    for (let i = 0; i &lt; elected.length; i++) {
+        const iWinner = elected[i]
+        allocation[iWinner] += 1
+    }
+    const socialChoiceResults = { allocation }
+    return socialChoiceResults
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-castVotes_castPairwise.html">castVotes/castPairwise</a></li><li><a href="module-castVotes_CastPairwiseSummer1DIntervals.html">castVotes/CastPairwiseSummer1DIntervals</a></li><li><a href="module-castVotes_CastPairwiseSummer2DPolygons.html">castVotes/CastPairwiseSummer2DPolygons</a></li><li><a href="module-castVotes_castPlurality.html">castVotes/castPlurality</a></li><li><a href="module-castVotes_CastPluralitySummer1DIntervals.html">castVotes/CastPluralitySummer1DIntervals</a></li><li><a href="module-castVotes_CastPluralitySummer2DQuadrature.html">castVotes/CastPluralitySummer2DQuadrature</a></li><li><a href="module-castVotes_castPluralityTestVote.html">castVotes/castPluralityTestVote</a></li><li><a href="module-castVotes_castRanking.html">castVotes/castRanking</a></li><li><a href="module-castVotes_castRankingFindIntervals.html">castVotes/castRankingFindIntervals</a></li><li><a href="module-castVotes_castRankingFindPolygons.html">castVotes/castRankingFindPolygons</a></li><li><a href="module-castVotes_CastRankingSummer1DIntervals.html">castVotes/CastRankingSummer1DIntervals</a></li><li><a href="module-castVotes_CastRankingSummer2DPolygons.html">castVotes/CastRankingSummer2DPolygons</a></li><li><a href="module-castVotes_castRankingTestVote.html">castVotes/castRankingTestVote</a></li><li><a href="module-castVotes_castScore.html">castVotes/castScore</a></li><li><a href="module-castVotes_CastScoreSummer1DGrid.html">castVotes/CastScoreSummer1DGrid</a></li><li><a href="module-castVotes_CastScoreSummer2DGrid.html">castVotes/CastScoreSummer2DGrid</a></li><li><a href="module-castVotes_castScoreTestVote.html">castVotes/castScoreTestVote</a></li><li><a href="module-castVotes_splitConvex.html">castVotes/splitConvex</a></li><li><a href="module-castVotes_voteCasters.html">castVotes/voteCasters</a></li><li><a href="module-command_addSaveConfigToLink.html">command/addSaveConfigToLink</a></li><li><a href="module-command_addSaveConfigToText.html">command/addSaveConfigToText</a></li><li><a href="module-command_addUndo.html">command/addUndo</a></li><li><a href="module-command_checkURL.html">command/checkURL</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-command_loadConfigText.html">command/loadConfigText</a></li><li><a href="module-election_CandidateDistributionSampler1D.html">election/CandidateDistributionSampler1D</a></li><li><a href="module-election_CandidateDistributionSampler2D.html">election/CandidateDistributionSampler2D</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_ElectionSampleGeo.html">election/ElectionSampleGeo</a></li><li><a href="module-election_SocialChoice.html">election/SocialChoice</a></li><li><a href="module-electionMethods_electionMethods.html">electionMethods/electionMethods</a></li><li><a href="module-electionMethods_huntingtonHill.html">electionMethods/huntingtonHill</a></li><li><a href="module-electionMethods_minimax.html">electionMethods/minimax</a></li><li><a href="module-electionMethods_plurality.html">electionMethods/plurality</a></li><li><a href="module-electionMethods_randomWinner.html">electionMethods/randomWinner</a></li><li><a href="module-electionMethods_score.html">electionMethods/score</a></li><li><a href="module-electionMethods_stv.html">electionMethods/stv</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_CandidateAddMakeButton.html">sim/CandidateAddMakeButton</a></li><li><a href="module-sim_CandidateDnAddMakeButton.html">sim/CandidateDnAddMakeButton</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-sim_VoterShapeAddMakeButton.html">sim/VoterShapeAddMakeButton</a></li><li><a href="module-test_test.html">test/test</a></li><li><a href="module-ui_addDoubleSandboxes.html">ui/addDoubleSandboxes</a></li><li><a href="module-ui_addSingleSandboxes.html">ui/addSingleSandboxes</a></li><li><a href="module-ui_addSVGOutput.html">ui/addSVGOutput</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_doubleSandbox.html">ui/doubleSandbox</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_sandbox.html">ui/sandbox</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-utilities_graphicsUtilities.html">utilities/graphicsUtilities</a></li><li><a href="module-utilities_jsHelpers.html">utilities/jsHelpers</a></li><li><a href="module-viz_colorBlend.html">viz/colorBlend</a></li><li><a href="module-viz_colorBlender.html">viz/colorBlender</a></li><li><a href="module-viz_geoColors.html">viz/geoColors</a></li><li><a href="module-viz_GeoMaps.html">viz/GeoMaps</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_Grid2D.html">viz/Grid2D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo.html">viz/VizGeo</a></li><li><a href="module-viz_VizOneGrid.html">viz/VizOneGrid</a></li><li><a href="module-viz_VizOneVoronoi.html">viz/VizOneVoronoi</a></li><li><a href="module-viz_VizOneVoronoiRanking.html">viz/VizOneVoronoiRanking</a></li><li><a href="module-viz_VizSample.html">viz/VizSample</a></li><li><a href="module-viz_VizSampleDensity1D.html">viz/VizSampleDensity1D</a></li><li><a href="module-viz_VizSampleDensity2D.html">viz/VizSampleDensity2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-viz_VoronoiRanking1D.html">viz/VoronoiRanking1D</a></li><li><a href="module-viz_VoronoiRanking2D.html">viz/VoronoiRanking2D</a></li><li><a href="module-viz_VoterRender1D.html">viz/VoterRender1D</a></li><li><a href="module-viz_VoterRender2D.html">viz/VoterRender2D</a></li><li><a href="module-vizEntities_CircleGraphic.html">vizEntities/CircleGraphic</a></li><li><a href="module-vizEntities_SquareGraphic.html">vizEntities/SquareGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoCensus.html">voters/geoCensus</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_lloydVoronoi.html">voters/lloydVoronoi</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul><h3>Classes</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-castVotes_CastPairwiseSummer1DIntervals.html">castVotes/CastPairwiseSummer1DIntervals</a></li><li><a href="module-castVotes_CastPairwiseSummer2DPolygons.html">castVotes/CastPairwiseSummer2DPolygons</a></li><li><a href="module-castVotes_CastPluralitySummer1DIntervals.html">castVotes/CastPluralitySummer1DIntervals</a></li><li><a href="module-castVotes_CastPluralitySummer2DQuadrature.html">castVotes/CastPluralitySummer2DQuadrature</a></li><li><a href="module-castVotes_castRankingFindIntervals.html">castVotes/castRankingFindIntervals</a></li><li><a href="module-castVotes_castRankingFindPolygons.html">castVotes/castRankingFindPolygons</a></li><li><a href="module-castVotes_CastRankingSummer1DIntervals.html">castVotes/CastRankingSummer1DIntervals</a></li><li><a href="module-castVotes_CastRankingSummer2DPolygons.html">castVotes/CastRankingSummer2DPolygons</a></li><li><a href="module-castVotes_CastScoreSummer1DGrid.html">castVotes/CastScoreSummer1DGrid</a></li><li><a href="module-castVotes_CastScoreSummer2DGrid.html">castVotes/CastScoreSummer2DGrid</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-election_CandidateDistributionSampler1D.html">election/CandidateDistributionSampler1D</a></li><li><a href="module-election_CandidateDistributionSampler2D.html">election/CandidateDistributionSampler2D</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_ElectionSampleGeo.html">election/ElectionSampleGeo</a></li><li><a href="module-election_SocialChoice.html">election/SocialChoice</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-viz_GeoMaps.html">viz/GeoMaps</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_Grid2D.html">viz/Grid2D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo.html">viz/VizGeo</a></li><li><a href="module-viz_VizOneGrid.html">viz/VizOneGrid</a></li><li><a href="module-viz_VizOneVoronoi.html">viz/VizOneVoronoi</a></li><li><a href="module-viz_VizOneVoronoiRanking.html">viz/VizOneVoronoiRanking</a></li><li><a href="module-viz_VizSample.html">viz/VizSample</a></li><li><a href="module-viz_VizSampleDensity1D.html">viz/VizSampleDensity1D</a></li><li><a href="module-viz_VizSampleDensity2D.html">viz/VizSampleDensity2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-viz_VoronoiRanking1D.html">viz/VoronoiRanking1D</a></li><li><a href="module-viz_VoronoiRanking2D.html">viz/VoronoiRanking2D</a></li><li><a href="module-vizEntities_CircleGraphic.html">vizEntities/CircleGraphic</a></li><li><a href="module-vizEntities_SquareGraphic.html">vizEntities/SquareGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.10</a> on Mon Jun 20 2022 16:20:18 GMT-0400 (Eastern Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

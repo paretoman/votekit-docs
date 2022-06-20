@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: sim/DraggableManager.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: sim/DraggableManager.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** @module */
+
+import { clamp, copyObjectShallow, minIndex } from '../utilities/jsHelpers.js'
+
+/**
+ * Draggable Manager gives draggable behavior to objects on a canvas.
+ * If anything changes, an item is added to the "changes" array.
+ * Calling screen.setEventHandlers(dragm.eventHandlers) sets the eventhandlers on the screen.
+ * @param {Screen} screen
+ * @param {Changes} changes
+ * @constructor
+ */
+export default function DraggableManager(screen, changes, sim) {
+    const self = this
+
+    // private variables
+    let drag = {}
+    const draggables = []
+
+    const grabCanvas = screen.tooltips
+
+    // add draggable objects
+    self.newSquareHandle = function (o, g) {
+        // set properties here so that we don't set properties on the actual object
+        const p = { isSquare: true }
+        draggables.push({ o, g, p })
+    }
+    self.newCircleHandle = function (o, g) { // object, graphic
+        const p = { isCircle: true }
+        draggables.push({ o, g, p })
+    }
+
+    // Mouse Listeners
+    // As a sidenote, it is interesting that we don't need to call model.update here
+    // because we are using a game loop that will call model.update.
+    const start = function (event) {
+        // don't interact with stuff underneath a tooltip
+        if (event.target.closest('.tooltipBox') !== null) {
+            return
+        }
+
+        const mouse = getMouse(event)
+        const extra = (event.isTouch) ? 10 : 0
+        const nd = draggables.length
+        // We are in the hitboxes of these draggables.
+        const hitList = []
+        for (let i = 0; i &lt; nd; i++) {
+            const d = draggables[i]
+            if ((d.o.exists || sim.showGhosts) &amp;&amp; hitTest(d, mouse, extra)) {
+                hitList.push(i)
+            }
+        }
+        if (hitList.length > 0) {
+            const distances2 = hitList.map((i) => {
+                const d = draggables[i]
+                const offX = d.o.x - mouse.x
+                const offY = d.o.y - mouse.y
+                return offX ** 2 + offY ** 2
+            })
+            // pick up
+            const iHitListClosest = minIndex(distances2)
+            const iDraggableClosest = hitList[iHitListClosest]
+
+            const d = draggables[iDraggableClosest]
+            drag.iDragging = iDraggableClosest
+            drag.isDragging = true
+            drag.offX = d.o.x - mouse.x
+            drag.offY = d.o.y - mouse.y
+            d.g.pickUp()
+            grabCanvas.dataset.cursor = 'grabbing' // CSS data attribute
+        }
+        startClickDetect(mouse)
+    }
+
+    const move = function (event) {
+        const mouse = getMouse(event)
+        if (drag.isDragging) { // because the mouse is moving
+            if (event.isTouch) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+            const dragging = draggables[drag.iDragging]
+
+            const w = screen.width
+            const h = screen.height
+            dragging.o.setXY({
+                x: clamp(mouse.x + drag.offX, 0, w),
+                y: clamp(mouse.y + drag.offY, 0, h),
+            })
+            changes.add(['draggables'])
+        } else {
+            // see if we're hovering over something grabbable
+            // because we want the user to see if they can grab something
+            const nd = draggables.length
+            for (let i = 0; i &lt; nd; i++) {
+                const d = draggables[i]
+                if ((sim.showGhosts || d.o.exists) &amp;&amp; hitTest(d, mouse, 0)) {
+                    grabCanvas.dataset.cursor = 'grab'
+                    return
+                }
+            }
+            grabCanvas.dataset.cursor = '' // nothing to grab
+        }
+        moveClickDetect(mouse)
+    }
+
+    const end = function () {
+        endClickDetect()
+        if (drag.iDragging !== undefined) {
+            const dragging = draggables[drag.iDragging]
+            dragging.g.drop()
+        }
+        drag = {}
+    }
+
+    // Touch Listeners
+    const touchmove = (e) => {
+        const pass = passTouch(e)
+        move(pass)
+    }
+    const touchstart = (e) => {
+        const pass = passTouch(e)
+        start(pass)
+    }
+    const touchend = (e) => {
+        const pass = passTouch(e)
+        move(pass)
+        end(pass)
+
+        // prevent mousedown from firing unless we're on a tooltip
+        if (e.target.closest('.tooltipBox') === null) {
+            e.preventDefault()
+        }
+    }
+
+    self.eventHandlers = {
+        start, move, end, touchmove, touchstart, touchend,
+    }
+
+    /**
+     * Make a touch event look like a mouse event, with a flag.
+     * @param {Event} e - The event from the DOM
+     * @returns {Event} - The same event it received, plus some added properties.
+     */
+    function passTouch(e) {
+        e.isTouch = true
+        return e
+    }
+
+    /** Fix position relative to parent
+     *  https://stackoverflow.com/questions/2614461/javascript-get-mouse-position-relative-to-parent-element
+     */
+    function getMouse(e) {
+        const rect = screen.canvas.getBoundingClientRect()
+        const c = (e.isTouch) ? e.changedTouches[0] : e
+        const x = c.clientX - rect.left
+        const y = c.clientY - rect.top
+        const mouse = { x, y }
+        return mouse
+    }
+
+    /**
+     * Check whether m, e.g. a mouse, hits d, a draggable object.
+     * @param {Object} d - An entry in the draggables array.
+     * @param {Object} m - An object with properties x and y, e.g. a mouse.
+     * @param {Number} extra - Extra slack to catch touches outside of the hitbox.
+     * @returns {Boolean} - Whether m hits d.
+     */
+    function hitTest(d, m, extra) {
+        // Only drag an object if we're near it.
+        const x = d.o.x - m.x
+        const y = d.o.y - m.y
+        if (d.p.isCircle) {
+            const { r } = d.g
+            const hit = x * x + y * y &lt; (r + extra) * (r + extra)
+            return hit
+        } if (d.p.isSquare) {
+            const { w, h } = d.g
+            const hit = Math.abs(x) &lt; 0.5 * w + extra &amp;&amp; Math.abs(y) &lt; 0.5 * h + extra
+            return hit
+        }
+        return false
+    }
+
+    // click detection //
+
+    let couldBeClick
+    let startPos
+    function startClickDetect(mouse) {
+        couldBeClick = true
+        startPos = copyObjectShallow(mouse)
+    }
+    function moveClickDetect(mouse) {
+        if (couldBeClick) {
+            const xDist = Math.abs(startPos.x - mouse.x)
+            const yDist = Math.abs(startPos.y - mouse.y)
+            if (xDist > 5) couldBeClick = false
+            if (yDist > 5) couldBeClick = false
+        }
+    }
+    function endClickDetect() {
+        if (couldBeClick) {
+            couldBeClick = false
+            if (drag.isDragging) { // because the mouse is moving
+                const dragging = draggables[drag.iDragging]
+                dragging.o.click()
+            } else {
+                // We are not dragging anything, and we clicked,
+                // and we're inside the screen because this could be a click,
+                // so let's do the click action for blank space.
+                clickEmpty(startPos)
+            }
+        }
+    }
+
+    // Test Point
+
+    function clickEmpty(p) {
+        sim.voterTest.start(p)
+    }
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-castVotes_castPairwise.html">castVotes/castPairwise</a></li><li><a href="module-castVotes_CastPairwiseSummer1DIntervals.html">castVotes/CastPairwiseSummer1DIntervals</a></li><li><a href="module-castVotes_CastPairwiseSummer2DPolygons.html">castVotes/CastPairwiseSummer2DPolygons</a></li><li><a href="module-castVotes_castPlurality.html">castVotes/castPlurality</a></li><li><a href="module-castVotes_CastPluralitySummer1DIntervals.html">castVotes/CastPluralitySummer1DIntervals</a></li><li><a href="module-castVotes_CastPluralitySummer2DQuadrature.html">castVotes/CastPluralitySummer2DQuadrature</a></li><li><a href="module-castVotes_castPluralityTestVote.html">castVotes/castPluralityTestVote</a></li><li><a href="module-castVotes_castRanking.html">castVotes/castRanking</a></li><li><a href="module-castVotes_castRankingFindIntervals.html">castVotes/castRankingFindIntervals</a></li><li><a href="module-castVotes_castRankingFindPolygons.html">castVotes/castRankingFindPolygons</a></li><li><a href="module-castVotes_CastRankingSummer1DIntervals.html">castVotes/CastRankingSummer1DIntervals</a></li><li><a href="module-castVotes_CastRankingSummer2DPolygons.html">castVotes/CastRankingSummer2DPolygons</a></li><li><a href="module-castVotes_castRankingTestVote.html">castVotes/castRankingTestVote</a></li><li><a href="module-castVotes_castScore.html">castVotes/castScore</a></li><li><a href="module-castVotes_CastScoreSummer1DGrid.html">castVotes/CastScoreSummer1DGrid</a></li><li><a href="module-castVotes_CastScoreSummer2DGrid.html">castVotes/CastScoreSummer2DGrid</a></li><li><a href="module-castVotes_castScoreTestVote.html">castVotes/castScoreTestVote</a></li><li><a href="module-castVotes_splitConvex.html">castVotes/splitConvex</a></li><li><a href="module-castVotes_voteCasters.html">castVotes/voteCasters</a></li><li><a href="module-command_addSaveConfigToLink.html">command/addSaveConfigToLink</a></li><li><a href="module-command_addSaveConfigToText.html">command/addSaveConfigToText</a></li><li><a href="module-command_addUndo.html">command/addUndo</a></li><li><a href="module-command_checkURL.html">command/checkURL</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-command_loadConfigText.html">command/loadConfigText</a></li><li><a href="module-election_CandidateDistributionSampler1D.html">election/CandidateDistributionSampler1D</a></li><li><a href="module-election_CandidateDistributionSampler2D.html">election/CandidateDistributionSampler2D</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_ElectionSampleGeo.html">election/ElectionSampleGeo</a></li><li><a href="module-election_SocialChoice.html">election/SocialChoice</a></li><li><a href="module-electionMethods_electionMethods.html">electionMethods/electionMethods</a></li><li><a href="module-electionMethods_huntingtonHill.html">electionMethods/huntingtonHill</a></li><li><a href="module-electionMethods_minimax.html">electionMethods/minimax</a></li><li><a href="module-electionMethods_plurality.html">electionMethods/plurality</a></li><li><a href="module-electionMethods_randomWinner.html">electionMethods/randomWinner</a></li><li><a href="module-electionMethods_score.html">electionMethods/score</a></li><li><a href="module-electionMethods_stv.html">electionMethods/stv</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_CandidateAddMakeButton.html">sim/CandidateAddMakeButton</a></li><li><a href="module-sim_CandidateDnAddMakeButton.html">sim/CandidateDnAddMakeButton</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-sim_VoterShapeAddMakeButton.html">sim/VoterShapeAddMakeButton</a></li><li><a href="module-test_test.html">test/test</a></li><li><a href="module-ui_addDoubleSandboxes.html">ui/addDoubleSandboxes</a></li><li><a href="module-ui_addSingleSandboxes.html">ui/addSingleSandboxes</a></li><li><a href="module-ui_addSVGOutput.html">ui/addSVGOutput</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_doubleSandbox.html">ui/doubleSandbox</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_sandbox.html">ui/sandbox</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-utilities_graphicsUtilities.html">utilities/graphicsUtilities</a></li><li><a href="module-utilities_jsHelpers.html">utilities/jsHelpers</a></li><li><a href="module-viz_colorBlend.html">viz/colorBlend</a></li><li><a href="module-viz_colorBlender.html">viz/colorBlender</a></li><li><a href="module-viz_geoColors.html">viz/geoColors</a></li><li><a href="module-viz_GeoMaps.html">viz/GeoMaps</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_Grid2D.html">viz/Grid2D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo.html">viz/VizGeo</a></li><li><a href="module-viz_VizOneGrid.html">viz/VizOneGrid</a></li><li><a href="module-viz_VizOneVoronoi.html">viz/VizOneVoronoi</a></li><li><a href="module-viz_VizOneVoronoiRanking.html">viz/VizOneVoronoiRanking</a></li><li><a href="module-viz_VizSample.html">viz/VizSample</a></li><li><a href="module-viz_VizSampleDensity1D.html">viz/VizSampleDensity1D</a></li><li><a href="module-viz_VizSampleDensity2D.html">viz/VizSampleDensity2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-viz_VoronoiRanking1D.html">viz/VoronoiRanking1D</a></li><li><a href="module-viz_VoronoiRanking2D.html">viz/VoronoiRanking2D</a></li><li><a href="module-viz_VoterRender1D.html">viz/VoterRender1D</a></li><li><a href="module-viz_VoterRender2D.html">viz/VoterRender2D</a></li><li><a href="module-vizEntities_CircleGraphic.html">vizEntities/CircleGraphic</a></li><li><a href="module-vizEntities_SquareGraphic.html">vizEntities/SquareGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoCensus.html">voters/geoCensus</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_lloydVoronoi.html">voters/lloydVoronoi</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul><h3>Classes</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-castVotes_CastPairwiseSummer1DIntervals.html">castVotes/CastPairwiseSummer1DIntervals</a></li><li><a href="module-castVotes_CastPairwiseSummer2DPolygons.html">castVotes/CastPairwiseSummer2DPolygons</a></li><li><a href="module-castVotes_CastPluralitySummer1DIntervals.html">castVotes/CastPluralitySummer1DIntervals</a></li><li><a href="module-castVotes_CastPluralitySummer2DQuadrature.html">castVotes/CastPluralitySummer2DQuadrature</a></li><li><a href="module-castVotes_castRankingFindIntervals.html">castVotes/castRankingFindIntervals</a></li><li><a href="module-castVotes_castRankingFindPolygons.html">castVotes/castRankingFindPolygons</a></li><li><a href="module-castVotes_CastRankingSummer1DIntervals.html">castVotes/CastRankingSummer1DIntervals</a></li><li><a href="module-castVotes_CastRankingSummer2DPolygons.html">castVotes/CastRankingSummer2DPolygons</a></li><li><a href="module-castVotes_CastScoreSummer1DGrid.html">castVotes/CastScoreSummer1DGrid</a></li><li><a href="module-castVotes_CastScoreSummer2DGrid.html">castVotes/CastScoreSummer2DGrid</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-election_CandidateDistributionSampler1D.html">election/CandidateDistributionSampler1D</a></li><li><a href="module-election_CandidateDistributionSampler2D.html">election/CandidateDistributionSampler2D</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_ElectionSampleGeo.html">election/ElectionSampleGeo</a></li><li><a href="module-election_SocialChoice.html">election/SocialChoice</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-viz_GeoMaps.html">viz/GeoMaps</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_Grid2D.html">viz/Grid2D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo.html">viz/VizGeo</a></li><li><a href="module-viz_VizOneGrid.html">viz/VizOneGrid</a></li><li><a href="module-viz_VizOneVoronoi.html">viz/VizOneVoronoi</a></li><li><a href="module-viz_VizOneVoronoiRanking.html">viz/VizOneVoronoiRanking</a></li><li><a href="module-viz_VizSample.html">viz/VizSample</a></li><li><a href="module-viz_VizSampleDensity1D.html">viz/VizSampleDensity1D</a></li><li><a href="module-viz_VizSampleDensity2D.html">viz/VizSampleDensity2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-viz_VoronoiRanking1D.html">viz/VoronoiRanking1D</a></li><li><a href="module-viz_VoronoiRanking2D.html">viz/VoronoiRanking2D</a></li><li><a href="module-vizEntities_CircleGraphic.html">vizEntities/CircleGraphic</a></li><li><a href="module-vizEntities_SquareGraphic.html">vizEntities/SquareGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.10</a> on Mon Jun 20 2022 16:20:18 GMT-0400 (Eastern Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

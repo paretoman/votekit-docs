@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: election/ElectionGeo.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: election/ElectionGeo.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** @module */
+
+import { range } from '../utilities/jsHelpers.js'
+
+/**
+ * An election with many districts.
+ * Voters are from many groups.
+ * Voter groups are centered around a point.
+ * The point is moved by simplex noise to create distinct districts.
+ * All the voter groups share the same voter basis.
+ * @param {Menu} menu
+ * @param {Election} election
+ * @constructor
+ */
+export default function ElectionGeo(election) {
+    const self = this
+
+    const optionCast = { usr: 32 }
+
+    self.runElectionSim = (voterGeoList, candidateSimList, changes) => {
+        if (changes.checkNone()) return { error: 'No Changes' }
+
+        const canList = candidateSimList.getCandidates()
+
+        const geoElectionResults = self.runElection2(voterGeoList, canList)
+
+        return geoElectionResults
+    }
+
+    self.runElection2 = (voterGeoList, canList) => {
+        if (voterGeoList.getVoterSims().length === 0) return { error: 'no voters' }
+        if (canList.length === 0) return { error: 'no candidates' }
+
+        const votesByTract = castVotesByTract(voterGeoList, canList)
+
+        const resultsStatewide = countStatewideElection(votesByTract, canList)
+
+        const resultsByTract = countTractElections(votesByTract, canList)
+
+        const resultsByDistrict = countDistrictElections(votesByTract, canList, voterGeoList)
+        const allocation = sumAllocations(resultsByDistrict, canList)
+
+        const geoElectionResults = {
+            resultsStatewide,
+            resultsByTract,
+            resultsByDistrict,
+            allocation,
+        }
+        return geoElectionResults
+    }
+
+    function castVotesByTract(voterGeoList, canList) {
+        const { voterGroupsByTract } = voterGeoList
+
+        const votesByTract = voterGroupsByTract.map(
+            (row) => row.map(
+                (voterGroups) => election.castVotes(voterGroups, canList, optionCast),
+            ),
+        )
+        return votesByTract
+    }
+
+    /** Show tallies over all the districts
+     * Find statewide support for candidates (parties).
+     */
+    function countStatewideElection(votesByTract, canList) {
+        const numCans = canList.length
+        const allVotes = combineVotes(votesByTract, numCans)
+
+        const resultsStatewide = election.socialChoice.run(canList, allVotes)
+        return resultsStatewide
+    }
+
+    function combineVotes(votesByTract, numCans) {
+        const votes = {}
+
+        if (votesByTract[0][0].tallyFractions !== undefined) {
+            // tf - tally fractions
+            const tf = statewideTallyFractions(votesByTract, numCans)
+            votes.tallyFractions = tf
+        }
+        if (votesByTract[0][0].pairwiseTallyFractions !== undefined) {
+            // pwtf - pairwise tally fractions
+            const pwtf = statewidePairwiseTallyFractions(votesByTract, numCans)
+            votes.pairwiseTallyFractions = pwtf
+        }
+        if (votesByTract[0][0].rankingTallyFractions !== undefined) {
+            // vrtf - votes ranked tally fractions
+            const vrtf = statewideRankingTallyFractions(votesByTract)
+            votes.rankingTallyFractions = vrtf.rankingTallyFractions
+            votes.cansRankedAll = vrtf.cansRankedAll
+        }
+        return votes
+    }
+
+    function statewideTallyFractions(votesByTract, numCans) {
+        // sum tallyFractions
+        const totals = Array(numCans).fill(0)
+        votesByTract.forEach(
+            (row) => row.forEach(
+                (votes) => {
+                    const { tallyFractions } = votes
+                    for (let k = 0; k &lt; numCans; k++) {
+                        totals[k] += tallyFractions[k]
+                    }
+                },
+            ),
+        )
+        const norm = 1 / totals.reduce((p, c) => p + c)
+        const tallyFractions = totals.map((t) => t * norm)
+        return tallyFractions
+    }
+
+    function statewidePairwiseTallyFractions(votesByTract, numCans) {
+        // sum pairwiseTallyFractions
+        const pTotals = Array(numCans)
+        for (let k = 0; k &lt; numCans; k++) {
+            pTotals[k] = Array(numCans).fill(0)
+        }
+        votesByTract.forEach(
+            (row) => row.forEach(
+                (votes) => {
+                    const { pairwiseTallyFractions } = votes
+                    for (let i = 0; i &lt; numCans; i++) {
+                        for (let k = 0; k &lt; numCans; k++) {
+                            pTotals[i][k] += pairwiseTallyFractions[i][k]
+                        }
+                    }
+                },
+            ),
+        )
+        const pNorm = 1 / (pTotals[0][1] + pTotals[1][0]) // sum wins and losses
+        const pairwiseTallyFractions = pTotals.map((row) => row.map((t) => t * pNorm))
+        return pairwiseTallyFractions
+    }
+
+    function statewideRankingTallyFractions(votesByTract) {
+        // concatenate rankingTallyFractions
+        let rankingTallyFractionsAll = []
+        let cansRankedAll2 = []
+        votesByTract.forEach(
+            (row) => row.forEach(
+                (votes) => {
+                    const { rankingTallyFractions, cansRankedAll } = votes
+                    rankingTallyFractionsAll = rankingTallyFractionsAll
+                        .concat(rankingTallyFractions)
+                    cansRankedAll2 = cansRankedAll2.concat(cansRankedAll)
+                },
+            ),
+        )
+        const numRows = votesByTract.length
+        const numCols = votesByTract[0].length
+        const rNorm = 1 / (numRows * numCols)
+        rankingTallyFractionsAll = rankingTallyFractionsAll.map((t) => t * rNorm)
+        return {
+            rankingTallyFractions: rankingTallyFractionsAll,
+            cansRankedAll: cansRankedAll2,
+        }
+    }
+
+    /** Visualize voter demographics according to votes for candidates within a tract.
+     * Hold mini-elections within a tract.
+     */
+    function countTractElections(votesByTract, canList) {
+        const resultsByTract = votesByTract.map(
+            (row) => row.map(
+                (votes) => election.socialChoice.run(canList, votes),
+            ),
+        )
+        return resultsByTract
+    }
+
+    /** Run separate elections in each district. */
+    function countDistrictElections(votesByTract, canList, voterGeoList) {
+        // Loop through districts.
+        // Find who won.
+
+        const votesByDistrict = combineVotesByDistrict(votesByTract, canList, voterGeoList)
+
+        const resultsByDistrict = votesByDistrict.map(
+            (votes) => election.socialChoice.run(canList, votes),
+        )
+        return resultsByDistrict
+    }
+
+    function combineVotesByDistrict(votesByTract, canList, voterGeoList) {
+        const { census } = voterGeoList.districtMaker
+        const { nd } = voterGeoList
+        const numCans = canList.length
+
+        // loop through districts
+        // each district has a census with a list of tracts with weights
+        // tracts are listed by index
+        // This is the same index as the votes list uses.
+        const votesByDistrict = range(nd).map((iDistrict) => {
+            const cen = census[iDistrict]
+
+            const votes = {}
+
+            if (votesByTract[0][0].tallyFractions !== undefined) {
+                // tf - tally fractions
+                const tf = districtTallyFractions(votesByTract, cen, numCans)
+                votes.tallyFractions = tf
+            }
+
+            if (votesByTract[0][0].pairwiseTallyFractions !== undefined) {
+                // pwtf - pairwise tally fractions
+                const pwtf = districtPairwiseTallyFractions(votesByTract, cen, numCans)
+                votes.pairwiseTallyFractions = pwtf
+            }
+            if (votesByTract[0][0].rankingTallyFractions !== undefined) {
+                // vrtf - votes ranked tally fractions
+                const vrtf = districtRankingTallyFractions(votesByTract, cen)
+                votes.rankingTallyFractions = vrtf.rankingTallyFractions
+                votes.cansRankedAll = vrtf.cansRankedAll
+            }
+            return votes
+        })
+        return votesByDistrict
+    }
+
+    function districtTallyFractions(votesByTract, cen, numCans) {
+        // sum tallyFractions
+        const totals = Array(numCans).fill(0)
+        for (let j = 0; j &lt; cen.length; j++) {
+            const [gx, gy, gf] = cen[j]
+            const { tallyFractions } = votesByTract[gx][gy]
+            for (let k = 0; k &lt; numCans; k++) {
+                totals[k] += tallyFractions[k] * gf
+            }
+        }
+        const norm = 1 / totals.reduce((p, c) => p + c)
+        const tallyFractions = totals.map((t) => t * norm)
+        return tallyFractions
+    }
+
+    function districtPairwiseTallyFractions(votesByTract, cen, numCans) {
+        // sum pairwiseTallyFractions
+        const pTotals = Array(numCans)
+        for (let k = 0; k &lt; numCans; k++) {
+            pTotals[k] = Array(numCans).fill(0)
+        }
+        for (let j = 0; j &lt; cen.length; j++) {
+            const [gx, gy, gf] = cen[j]
+            const { pairwiseTallyFractions } = votesByTract[gx][gy]
+            for (let i = 0; i &lt; numCans; i++) {
+                for (let k = 0; k &lt; numCans; k++) {
+                    pTotals[i][k] += pairwiseTallyFractions[i][k] * gf
+                }
+            }
+        }
+        const pNorm = 1 / (pTotals[0][1] + pTotals[1][0]) // sum wins and losses
+        const pairwiseTallyFractions = pTotals.map((row) => row.map((t) => t * pNorm))
+        return pairwiseTallyFractions
+    }
+
+    function districtRankingTallyFractions(votesByTract, cen) {
+        // concatenate rankingTallyFractions
+        let rankingTallyFractionsAll = []
+        let cansRankedAll2 = []
+
+        let gfSum = 0
+        for (let j = 0; j &lt; cen.length; j++) {
+            const [, , gf] = cen[j]
+            gfSum += gf
+        }
+        const gfNorm = 1 / gfSum
+
+        for (let j = 0; j &lt; cen.length; j++) {
+            const [gx, gy, gf] = cen[j]
+            gfSum += gf
+            const { rankingTallyFractions, cansRankedAll } = votesByTract[gx][gy]
+            const rankingTallyFractionsNorm = rankingTallyFractions
+                .map((x) => x * gf * gfNorm)
+            rankingTallyFractionsAll = rankingTallyFractionsAll
+                .concat(rankingTallyFractionsNorm)
+            cansRankedAll2 = cansRankedAll2.concat(cansRankedAll)
+        }
+        return {
+            rankingTallyFractions: rankingTallyFractionsAll,
+            cansRankedAll: cansRankedAll2,
+        }
+    }
+
+    // Show wins across all districts for each candidate
+    function sumAllocations(resultsByDistrict, canList) {
+        // make a histogram of allocation
+        const numCandidates = canList.length
+        const allocation = Array(numCandidates).fill(0)
+        if (election.socialChoice.checkElectionType() === 'singleWinner') {
+            const iWinners = resultsByDistrict.map((electionResults) => electionResults.iWinner)
+            iWinners.forEach((iWinner) => {
+                allocation[iWinner] += 1
+            })
+        } else {
+            resultsByDistrict.forEach(
+                (electionResults) => {
+                    for (let i = 0; i &lt; numCandidates; i++) {
+                        allocation[i] += electionResults.allocation[i]
+                    }
+                },
+            )
+        }
+        return allocation
+    }
+
+    self.testVoteES = (voterTest, candidateSimList) => {
+        const vote = election.testVoteE(voterTest, candidateSimList)
+        return vote
+    }
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-castVotes_castPairwise.html">castVotes/castPairwise</a></li><li><a href="module-castVotes_CastPairwiseSummer1DIntervals.html">castVotes/CastPairwiseSummer1DIntervals</a></li><li><a href="module-castVotes_CastPairwiseSummer2DPolygons.html">castVotes/CastPairwiseSummer2DPolygons</a></li><li><a href="module-castVotes_castPlurality.html">castVotes/castPlurality</a></li><li><a href="module-castVotes_CastPluralitySummer1DIntervals.html">castVotes/CastPluralitySummer1DIntervals</a></li><li><a href="module-castVotes_CastPluralitySummer2DQuadrature.html">castVotes/CastPluralitySummer2DQuadrature</a></li><li><a href="module-castVotes_castPluralityTestVote.html">castVotes/castPluralityTestVote</a></li><li><a href="module-castVotes_castRanking.html">castVotes/castRanking</a></li><li><a href="module-castVotes_castRankingFindIntervals.html">castVotes/castRankingFindIntervals</a></li><li><a href="module-castVotes_castRankingFindPolygons.html">castVotes/castRankingFindPolygons</a></li><li><a href="module-castVotes_CastRankingSummer1DIntervals.html">castVotes/CastRankingSummer1DIntervals</a></li><li><a href="module-castVotes_CastRankingSummer2DPolygons.html">castVotes/CastRankingSummer2DPolygons</a></li><li><a href="module-castVotes_castRankingTestVote.html">castVotes/castRankingTestVote</a></li><li><a href="module-castVotes_castScore.html">castVotes/castScore</a></li><li><a href="module-castVotes_CastScoreSummer1DGrid.html">castVotes/CastScoreSummer1DGrid</a></li><li><a href="module-castVotes_CastScoreSummer2DGrid.html">castVotes/CastScoreSummer2DGrid</a></li><li><a href="module-castVotes_castScoreTestVote.html">castVotes/castScoreTestVote</a></li><li><a href="module-castVotes_splitConvex.html">castVotes/splitConvex</a></li><li><a href="module-castVotes_voteCasters.html">castVotes/voteCasters</a></li><li><a href="module-command_addSaveConfigToLink.html">command/addSaveConfigToLink</a></li><li><a href="module-command_addSaveConfigToText.html">command/addSaveConfigToText</a></li><li><a href="module-command_addUndo.html">command/addUndo</a></li><li><a href="module-command_checkURL.html">command/checkURL</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-command_loadConfigText.html">command/loadConfigText</a></li><li><a href="module-election_CandidateDistributionSampler1D.html">election/CandidateDistributionSampler1D</a></li><li><a href="module-election_CandidateDistributionSampler2D.html">election/CandidateDistributionSampler2D</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_ElectionSampleGeo.html">election/ElectionSampleGeo</a></li><li><a href="module-election_SocialChoice.html">election/SocialChoice</a></li><li><a href="module-electionMethods_electionMethods.html">electionMethods/electionMethods</a></li><li><a href="module-electionMethods_huntingtonHill.html">electionMethods/huntingtonHill</a></li><li><a href="module-electionMethods_minimax.html">electionMethods/minimax</a></li><li><a href="module-electionMethods_plurality.html">electionMethods/plurality</a></li><li><a href="module-electionMethods_randomWinner.html">electionMethods/randomWinner</a></li><li><a href="module-electionMethods_score.html">electionMethods/score</a></li><li><a href="module-electionMethods_stv.html">electionMethods/stv</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_CandidateAddMakeButton.html">sim/CandidateAddMakeButton</a></li><li><a href="module-sim_CandidateDnAddMakeButton.html">sim/CandidateDnAddMakeButton</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-sim_VoterShapeAddMakeButton.html">sim/VoterShapeAddMakeButton</a></li><li><a href="module-test_test.html">test/test</a></li><li><a href="module-ui_addDoubleSandboxes.html">ui/addDoubleSandboxes</a></li><li><a href="module-ui_addSingleSandboxes.html">ui/addSingleSandboxes</a></li><li><a href="module-ui_addSVGOutput.html">ui/addSVGOutput</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_doubleSandbox.html">ui/doubleSandbox</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_sandbox.html">ui/sandbox</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-utilities_graphicsUtilities.html">utilities/graphicsUtilities</a></li><li><a href="module-utilities_jsHelpers.html">utilities/jsHelpers</a></li><li><a href="module-viz_colorBlend.html">viz/colorBlend</a></li><li><a href="module-viz_colorBlender.html">viz/colorBlender</a></li><li><a href="module-viz_geoColors.html">viz/geoColors</a></li><li><a href="module-viz_GeoMaps.html">viz/GeoMaps</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_Grid2D.html">viz/Grid2D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo.html">viz/VizGeo</a></li><li><a href="module-viz_VizOneGrid.html">viz/VizOneGrid</a></li><li><a href="module-viz_VizOneVoronoi.html">viz/VizOneVoronoi</a></li><li><a href="module-viz_VizOneVoronoiRanking.html">viz/VizOneVoronoiRanking</a></li><li><a href="module-viz_VizSample.html">viz/VizSample</a></li><li><a href="module-viz_VizSampleDensity1D.html">viz/VizSampleDensity1D</a></li><li><a href="module-viz_VizSampleDensity2D.html">viz/VizSampleDensity2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-viz_VoronoiRanking1D.html">viz/VoronoiRanking1D</a></li><li><a href="module-viz_VoronoiRanking2D.html">viz/VoronoiRanking2D</a></li><li><a href="module-viz_VoterRender1D.html">viz/VoterRender1D</a></li><li><a href="module-viz_VoterRender2D.html">viz/VoterRender2D</a></li><li><a href="module-vizEntities_CircleGraphic.html">vizEntities/CircleGraphic</a></li><li><a href="module-vizEntities_SquareGraphic.html">vizEntities/SquareGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoCensus.html">voters/geoCensus</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_lloydVoronoi.html">voters/lloydVoronoi</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul><h3>Classes</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-castVotes_CastPairwiseSummer1DIntervals.html">castVotes/CastPairwiseSummer1DIntervals</a></li><li><a href="module-castVotes_CastPairwiseSummer2DPolygons.html">castVotes/CastPairwiseSummer2DPolygons</a></li><li><a href="module-castVotes_CastPluralitySummer1DIntervals.html">castVotes/CastPluralitySummer1DIntervals</a></li><li><a href="module-castVotes_CastPluralitySummer2DQuadrature.html">castVotes/CastPluralitySummer2DQuadrature</a></li><li><a href="module-castVotes_castRankingFindIntervals.html">castVotes/castRankingFindIntervals</a></li><li><a href="module-castVotes_castRankingFindPolygons.html">castVotes/castRankingFindPolygons</a></li><li><a href="module-castVotes_CastRankingSummer1DIntervals.html">castVotes/CastRankingSummer1DIntervals</a></li><li><a href="module-castVotes_CastRankingSummer2DPolygons.html">castVotes/CastRankingSummer2DPolygons</a></li><li><a href="module-castVotes_CastScoreSummer1DGrid.html">castVotes/CastScoreSummer1DGrid</a></li><li><a href="module-castVotes_CastScoreSummer2DGrid.html">castVotes/CastScoreSummer2DGrid</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-election_CandidateDistributionSampler1D.html">election/CandidateDistributionSampler1D</a></li><li><a href="module-election_CandidateDistributionSampler2D.html">election/CandidateDistributionSampler2D</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_ElectionSampleGeo.html">election/ElectionSampleGeo</a></li><li><a href="module-election_SocialChoice.html">election/SocialChoice</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-viz_GeoMaps.html">viz/GeoMaps</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_Grid2D.html">viz/Grid2D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo.html">viz/VizGeo</a></li><li><a href="module-viz_VizOneGrid.html">viz/VizOneGrid</a></li><li><a href="module-viz_VizOneVoronoi.html">viz/VizOneVoronoi</a></li><li><a href="module-viz_VizOneVoronoiRanking.html">viz/VizOneVoronoiRanking</a></li><li><a href="module-viz_VizSample.html">viz/VizSample</a></li><li><a href="module-viz_VizSampleDensity1D.html">viz/VizSampleDensity1D</a></li><li><a href="module-viz_VizSampleDensity2D.html">viz/VizSampleDensity2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-viz_VoronoiRanking1D.html">viz/VoronoiRanking1D</a></li><li><a href="module-viz_VoronoiRanking2D.html">viz/VoronoiRanking2D</a></li><li><a href="module-vizEntities_CircleGraphic.html">vizEntities/CircleGraphic</a></li><li><a href="module-vizEntities_SquareGraphic.html">vizEntities/SquareGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.10</a> on Mon Jun 20 2022 16:20:18 GMT-0400 (Eastern Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

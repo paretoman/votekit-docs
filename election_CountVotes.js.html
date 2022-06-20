@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: election/CountVotes.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: election/CountVotes.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** @module */
+
+import electionMethods from '../electionMethods/electionMethods.js'
+
+/**
+ * Store settings and functions that deal with the election method.
+ * The difference between CountVotes and Election is that
+ * Election encompasses all concepts of an election such as casting a vote
+ * or the number of dimensions,
+ * while CountVotes just considers the votes and the result of counting.
+ * Then CountVotes returns a summary of how the election went.
+ * Perhaps CountingMethod is a more specific name.
+ * @param {Candidate[]} candidates
+ * @param {Menu} menu
+ * @constructor
+ */
+export default function CountVotes(menu) {
+    const self = this
+
+    self.seats = 1
+
+    self.run = (candidates, votes) => {
+        // why have two different kinds of results?
+        // countResults, the smaller one,
+        //   is in the context of the election method,
+        //   which has tallies go in and analysis come out
+        // electionResults, the larger one,
+        //   is in the context of candidate objects and voter objects.
+        let electionResults
+        if (self.checkElectionType() === 'allocation') {
+            const electionMethodOptions = { seats: 5, threshold: 0.2 }
+            self.seats = electionMethodOptions.seats
+            const countResults = electionMethods[self.electionMethod](votes, electionMethodOptions)
+            const { allocation } = countResults
+            electionResults = { allocation, candidates, votes }
+        } else {
+            self.seats = 1
+            const countResults = electionMethods[self.electionMethod](votes)
+            const { iWinner } = countResults
+            const winner = candidates[iWinner]
+            electionResults = { iWinner, winner, votes }
+        }
+        return electionResults
+    }
+
+    // -- Menu --
+
+    // a list of election methods
+    self.electionMethodList = [
+        {
+            name: 'Huntington Hill', value: 'huntingtonHill', type: 'allocation', caster: 'pluralityBallot',
+        },
+        {
+            name: 'Plurality', value: 'plurality', type: 'singleWinner', caster: 'pluralityBallot',
+        },
+        {
+            name: 'Random Winner', value: 'randomWinner', type: 'singleWinner', caster: 'pluralityBallot',
+        },
+        {
+            name: 'Score', value: 'score', type: 'singleWinner', caster: 'castScore',
+        },
+    ]
+
+    // utilities for looking up this list
+    self.checkElectionType = () => self.electionMethodListByFunctionName[self.electionMethod].type
+    self.electionMethodListByFunctionName = []
+    self.electionMethodList.forEach(
+        (x) => { self.electionMethodListByFunctionName[x.value] = x },
+    )
+
+    /**
+     * Called in onclick.
+     * @param {(String|Number|Boolean)} value
+     */
+    self.setElectionMethod = (value) => {
+        self.electionMethod = value
+        self.caster = self.electionMethodListByFunctionName[value].caster
+    }
+
+    // add a menu item to switch between types of elections
+    self.setElectionMethod('plurality')
+
+    menu.addMenuItem(
+        self,
+        {
+            label: 'Election Method:',
+            prop: 'electionMethod',
+            setProp: self.setElectionMethod,
+            options: self.electionMethodList,
+            change: ['electionMethod'],
+        },
+    )
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateDistribution.html">candidates/CandidateDistribution</a></li><li><a href="module-candidates_CandidateDnCommander.html">candidates/CandidateDnCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-candidates_SimCandidate.html">candidates/SimCandidate</a></li><li><a href="module-candidates_SimCandidateDistribution.html">candidates/SimCandidateDistribution</a></li><li><a href="module-candidates_SimCandidateDistributionList.html">candidates/SimCandidateDistributionList</a></li><li><a href="module-candidates_SimCandidateList.html">candidates/SimCandidateList</a></li><li><a href="module-candidates_SquareGraphic.html">candidates/SquareGraphic</a></li><li><a href="module-castVotes_castPlurality.html">castVotes/castPlurality</a></li><li><a href="module-castVotes_CastPluralityAreaSummer.html">castVotes/CastPluralityAreaSummer</a></li><li><a href="module-castVotes_CastPluralityLineSummer.html">castVotes/CastPluralityLineSummer</a></li><li><a href="module-castVotes_CastScore.html">castVotes/CastScore</a></li><li><a href="module-castVotes_CastScoreAreaSummer.html">castVotes/CastScoreAreaSummer</a></li><li><a href="module-castVotes_CastScoreLineSummer.html">castVotes/CastScoreLineSummer</a></li><li><a href="module-castVotes_castVotes.html">castVotes/castVotes</a></li><li><a href="module-command_addSaveConfigToLink.html">command/addSaveConfigToLink</a></li><li><a href="module-command_addSaveConfigToText.html">command/addSaveConfigToText</a></li><li><a href="module-command_addUndo.html">command/addUndo</a></li><li><a href="module-command_checkURL.html">command/checkURL</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-command_loadConfigText.html">command/loadConfigText</a></li><li><a href="module-election_CandidateDistributionSampler.html">election/CandidateDistributionSampler</a></li><li><a href="module-election_colorBlend.html">election/colorBlend</a></li><li><a href="module-election_CountVotes.html">election/CountVotes</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionMethod.html">election/ElectionMethod</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_GeoElection.html">election/GeoElection</a></li><li><a href="module-election_OneElection.html">election/OneElection</a></li><li><a href="module-election_SampleElections.html">election/SampleElections</a></li><li><a href="module-electionMethods_electionMethods.html">electionMethods/electionMethods</a></li><li><a href="module-electionMethods_huntingtonHill.html">electionMethods/huntingtonHill</a></li><li><a href="module-electionMethods_plurality.html">electionMethods/plurality</a></li><li><a href="module-electionMethods_randomWinner.html">electionMethods/randomWinner</a></li><li><a href="module-electionMethods_score.html">electionMethods/score</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_CandidateAddMakeButton.html">sim/CandidateAddMakeButton</a></li><li><a href="module-sim_CandidateDnAddMakeButton.html">sim/CandidateDnAddMakeButton</a></li><li><a href="module-sim_CreateAddCandidate.html">sim/CreateAddCandidate</a></li><li><a href="module-sim_CreateAddCandidateDistribution.html">sim/CreateAddCandidateDistribution</a></li><li><a href="module-sim_createAddVoter.html">sim/createAddVoter</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimGeoOne.html">sim/states/SimGeoOne</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimOne1D.html">sim/states/SimOne1D</a></li><li><a href="module-sim_states_SimOne2D.html">sim/states/SimOne2D</a></li><li><a href="module-sim_states_SimOneDOne.html">sim/states/SimOneDOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-sim_VoterShapeAddMakeButton.html">sim/VoterShapeAddMakeButton</a></li><li><a href="module-test_test.html">test/test</a></li><li><a href="module-ui_addDoubleSandboxes.html">ui/addDoubleSandboxes</a></li><li><a href="module-ui_addSingleSandboxes.html">ui/addSingleSandboxes</a></li><li><a href="module-ui_addSVGOutput.html">ui/addSVGOutput</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_doubleSandbox.html">ui/doubleSandbox</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_sandbox.html">ui/sandbox</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-utilities_graphicsUtilities.html">utilities/graphicsUtilities</a></li><li><a href="module-utilities_jsHelpers.html">utilities/jsHelpers</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo2D.html">viz/VizGeo2D</a></li><li><a href="module-viz_VizOne1D.html">viz/VizOne1D</a></li><li><a href="module-viz_VizOne2D.html">viz/VizOne2D</a></li><li><a href="module-viz_VizSample2D.html">viz/VizSample2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-voters_CircleGraphic.html">voters/CircleGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoCensus.html">voters/geoCensus</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_lloydVoronoi.html">voters/lloydVoronoi</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoBasis.html">voters/VoterGeoBasis</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul><h3>Classes</h3><ul><li><a href="module-candidateDns_CandidateDn.html">candidateDns/CandidateDn</a></li><li><a href="module-candidateDns_CandidateDnCommander.html">candidateDns/CandidateDnCommander</a></li><li><a href="module-candidateDns_CandidateDnSim.html">candidateDns/CandidateDnSim</a></li><li><a href="module-candidateDns_CandidateDnSimList.html">candidateDns/CandidateDnSimList</a></li><li><a href="module-candidates_Candidate.html">candidates/Candidate</a></li><li><a href="module-candidates_CandidateCommander.html">candidates/CandidateCommander</a></li><li><a href="module-candidates_CandidateDistribution.html">candidates/CandidateDistribution</a></li><li><a href="module-candidates_CandidateDnCommander.html">candidates/CandidateDnCommander</a></li><li><a href="module-candidates_CandidateSim.html">candidates/CandidateSim</a></li><li><a href="module-candidates_CandidateSimList.html">candidates/CandidateSimList</a></li><li><a href="module-candidates_SimCandidate.html">candidates/SimCandidate</a></li><li><a href="module-candidates_SimCandidateDistribution.html">candidates/SimCandidateDistribution</a></li><li><a href="module-candidates_SimCandidateDistributionList.html">candidates/SimCandidateDistributionList</a></li><li><a href="module-candidates_SimCandidateList.html">candidates/SimCandidateList</a></li><li><a href="module-candidates_SquareGraphic.html">candidates/SquareGraphic</a></li><li><a href="module-castVotes_CastPluralityAreaSummer.html">castVotes/CastPluralityAreaSummer</a></li><li><a href="module-castVotes_CastPluralityLineSummer.html">castVotes/CastPluralityLineSummer</a></li><li><a href="module-castVotes_CastScoreAreaSummer.html">castVotes/CastScoreAreaSummer</a></li><li><a href="module-castVotes_CastScoreLineSummer.html">castVotes/CastScoreLineSummer</a></li><li><a href="module-command_Commander.html">command/Commander</a></li><li><a href="module-command_ComMessenger.html">command/ComMessenger</a></li><li><a href="module-election_CandidateDistributionSampler.html">election/CandidateDistributionSampler</a></li><li><a href="module-election_CountVotes.html">election/CountVotes</a></li><li><a href="module-election_Election.html">election/Election</a></li><li><a href="module-election_ElectionGeo.html">election/ElectionGeo</a></li><li><a href="module-election_ElectionMethod.html">election/ElectionMethod</a></li><li><a href="module-election_ElectionOne.html">election/ElectionOne</a></li><li><a href="module-election_ElectionSample.html">election/ElectionSample</a></li><li><a href="module-election_GeoElection.html">election/GeoElection</a></li><li><a href="module-election_OneElection.html">election/OneElection</a></li><li><a href="module-election_SampleElections.html">election/SampleElections</a></li><li><a href="module-menu_Button.html">menu/Button</a></li><li><a href="module-menu_ButtonGroup.html">menu/ButtonGroup</a></li><li><a href="module-menu_Menu.html">menu/Menu</a></li><li><a href="module-menu_MenuItem.html">menu/MenuItem</a></li><li><a href="module-sim_DraggableManager.html">sim/DraggableManager</a></li><li><a href="module-sim_Registrar.html">sim/Registrar</a></li><li><a href="module-sim_Sim.html">sim/Sim</a></li><li><a href="module-sim_states_SimBase.html">sim/states/SimBase</a></li><li><a href="module-sim_states_SimGeoOne.html">sim/states/SimGeoOne</a></li><li><a href="module-sim_states_SimOne.html">sim/states/SimOne</a></li><li><a href="module-sim_states_SimOne1D.html">sim/states/SimOne1D</a></li><li><a href="module-sim_states_SimOne2D.html">sim/states/SimOne2D</a></li><li><a href="module-sim_states_SimOneDOne.html">sim/states/SimOneDOne</a></li><li><a href="module-sim_states_SimSample.html">sim/states/SimSample</a></li><li><a href="module-ui_Changes.html">ui/Changes</a></li><li><a href="module-ui_EventHandlers.html">ui/EventHandlers</a></li><li><a href="module-ui_Layout.html">ui/Layout</a></li><li><a href="module-ui_Screen.html">ui/Screen</a></li><li><a href="module-viz_Grid1D.html">viz/Grid1D</a></li><li><a href="module-viz_NoiseImage.html">viz/NoiseImage</a></li><li><a href="module-viz_VizGeo2D.html">viz/VizGeo2D</a></li><li><a href="module-viz_VizOne1D.html">viz/VizOne1D</a></li><li><a href="module-viz_VizOne2D.html">viz/VizOne2D</a></li><li><a href="module-viz_VizSample2D.html">viz/VizSample2D</a></li><li><a href="module-viz_Voronoi1D.html">viz/Voronoi1D</a></li><li><a href="module-viz_Voronoi2D.html">viz/Voronoi2D</a></li><li><a href="module-voters_CircleGraphic.html">voters/CircleGraphic</a></li><li><a href="module-voters_DistrictMaker.html">voters/DistrictMaker</a></li><li><a href="module-voters_geoNoise.html">voters/geoNoise</a></li><li><a href="module-voters_VoterCommander.html">voters/VoterCommander</a></li><li><a href="module-voters_VoterGeoBasis.html">voters/VoterGeoBasis</a></li><li><a href="module-voters_VoterGeoList.html">voters/VoterGeoList</a></li><li><a href="module-voters_VoterShape.html">voters/VoterShape</a></li><li><a href="module-voters_VoterSim.html">voters/VoterSim</a></li><li><a href="module-voters_VoterSimList.html">voters/VoterSimList</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 3.6.10</a> on Mon Jun 20 2022 13:04:13 GMT-0400 (Eastern Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
